@@ -1,0 +1,228 @@
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/file.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <sys/time.h>
+#include <netdb.h>
+
+//constants for pipe FDs
+#define WFD 1
+#define RFD 0
+
+
+
+
+/*/*
+ * monitor - provides a local chat window
+ * @param srfd - server read file descriptor
+ * @param swfd - server write file descriptor
+ *
+ * */
+//https://www.geeksforgeeks.org/socket-programming-cc/
+void monitor(int srfd, int swfd){
+	char buf[1024];
+  	int readSize;
+  	int writeSize;
+
+  while(1){
+
+
+     if((readSize = read(srfd, buf, sizeof(buf))) == -1){
+         perror("Monitor Read Error");
+         exit(1);
+      }
+      if(readSize == 0){
+        break;
+      }
+
+     write(STDOUT_FILENO, buf, readSize);
+     readSize = read(STDIN_FILENO, buf, sizeof(buf));
+     if(readSize == -1){
+      perror("Client Read Error");
+      exit(1);
+      }
+     if (readSize == 0){
+     	      break;
+     }
+    writeSize = write(swfd, buf, readSize);
+ }
+
+
+
+
+
+//printf("closing fd in monitor");
+close(srfd);
+close(swfd);
+
+}
+/*
+ * server - relays chat messages
+ * @param mrfd - monitor read file descriptor
+ * @param mwfd - monitor write file descriptor
+ * @param portno - TCP port number to use for client connections
+ *
+ * */
+void server(int mrfd, int mwfd, char*  portStr) {
+  int val = 1;
+  int errC;
+  int sfd;
+  int afd;
+  struct sockaddr_storage clientAddr;
+  struct addrinfo hints, *res;
+  char buf[1024];
+  int readSize;
+  int writeSize;
+  int opt;
+  int portNum;
+  portNum= atoi(portStr);
+  struct sockaddr_in serv_addr;
+
+  printf("before socket");
+
+   serv_addr.sin_family = AF_INET;
+   serv_addr.sin_addr.s_addr = INADDR_ANY;
+   serv_addr.sin_port = htons(portNum);
+
+   sfd = socket(AF_INET, SOCK_STREAM, 0 );
+   if(sfd  == -1){
+      perror("yo socket failed\n ");
+      exit(1);
+   }
+   printf("after socket");
+
+   //https://stackoverflow.com/questions/24194961/how-do-i-use-setsockoptso-reuseaddr
+   if((setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val))) < 0){
+     perror("setsockopt Failure \n");
+     exit(1);
+  }
+
+//bind
+
+  if((bind(sfd, (struct sockaddr*) &serv_addr, sizeof(serv_addr) )) == -1){
+     perror("Bind Error\n ");
+     exit(1);
+   }
+//listen
+  if((listen(sfd, 10)) == -1){
+    perror("Listen Error\n ");
+    exit(1);
+  }
+// accept
+// https://beej.us/guide/bgnet/html/multi/sockaddr_inman.html
+
+//integer to point conversion fix
+
+  socklen_t  lenClientA = sizeof(clientAddr);
+
+  if((afd = accept(sfd, (struct sockaddr*) &clientAddr, &lenClientA)) == -1){
+    perror("Accept Error\n ");
+    exit(1);
+  }
+
+
+  while(1){
+     if((readSize = read(afd, buf, sizeof(buf))) == -1){
+        perror("server (accept)  socket Read Error\n ");
+        exit(1);
+     }
+     if(readSize == 0){
+        break;
+     }
+      write(mwfd, buf, readSize);
+      readSize = read(mrfd, buf, sizeof(buf));
+      if(readSize == -1){
+         perror("Server Monitor Read Error\n ");
+         exit(1);
+       }
+      if(readSize == 0){
+        break;
+      }
+       writeSize = write(afd, buf, readSize);
+ }
+  close(afd);
+  close(sfd);
+  close(mwfd);
+  close(mrfd);
+
+ }
+int main(int argc, char **argv){
+  //implement me
+  pid_t p;
+  int portNum;
+  char* portStr;
+  int opt;
+  int monitorToServ[2];
+  int serverToMon[2];
+
+  while((opt = getopt(argc, argv, "hp:")) != -1){
+
+    switch(opt){
+      case 'h':
+
+        printf("usage: ./server [-h] [-p port #] \n");
+        printf("      -h - this help message \n");
+        printf("      -p # - the port to use when connecting to the server\n");
+
+      case 'p':
+
+
+        portStr = optarg;
+        portNum = atoi(optarg);
+
+        break;
+
+    }
+  }
+ // printf("end of while\n ");
+  //https://www.geeksforgeeks.org/c-program-demonstrate-fork-and-pipe/
+ // int serverToMon[2];
+ // int monitorToServ[2];
+//  printf(" servertoMon");
+  if(pipe(serverToMon) == -1){
+    perror("Pipe to Monitor Failed\n");
+    exit(1);
+  }
+//  printf("MontoServ");
+  if(pipe(monitorToServ) == -1){
+    perror("Pipe to Server Failed\n");
+    exit(1);
+  }
+
+p = fork();
+
+if(p < 0){
+    perror("Fork Failed\n");
+    exit(1);
+  }else if(p == 0){
+    close(monitorToServ[RFD]);
+    close(serverToMon[WFD]);
+ //   printf("Entering monitor");
+    monitor(serverToMon[RFD], monitorToServ[WFD]);
+    printf("leaving monitor");
+    close(monitorToServ[WFD]);
+    close(serverToMon[RFD]);
+    exit(EXIT_SUCCESS);
+  }else{
+   // printf("in else\n ");
+    close(monitorToServ[WFD]);
+    close(serverToMon[RFD]);
+    printf("Entering server\n");
+    //used portStr bc itoa caused issues
+    server(monitorToServ[RFD], serverToMon[WFD], portStr);
+    printf("Leaving server \n");
+
+    close(monitorToServ[RFD]);
+    close(serverToMon[WFD]);
+    exit(EXIT_SUCCESS);
+
+      }
+
+}

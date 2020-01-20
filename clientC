@@ -1,0 +1,86 @@
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <netinet/in.h>
+#include <string.h>
+#include <sys/types.h>
+#include <netdb.h>
+
+int main(int argc, char **argv){
+  struct sockaddr addr;
+  char buf[1024];
+  int readSize;
+  int writeSize;
+  int sfd;
+  int errC;
+  //struct hostent *srh = gethostbyname("senna.rhodes.edu");
+  int opt;
+  int portNum;
+  char* portStr;;
+  struct addrinfo hints, *res;
+
+  //https://gist.github.com/jirihnidek/bf7a2363e480491da72301b228b35d5d
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = 0;
+
+
+
+  while((opt = getopt(argc, argv, "hp:")) != -1){
+    switch(opt){
+      case 'h':
+        printf("usage: ./server [-h] [-p port #] \n");
+        printf("      -h - this help message \n");
+        printf("      -p # - the port to use when connecting to the server\n");
+        exit(EXIT_SUCCESS);
+        break;
+      case 'p':
+        portNum = atoi(optarg);
+        portStr = optarg;
+       // portStr = itoa(portNum, portStr, 10);
+        printf("Port Received");
+        break;
+    }
+  }
+  //getaddr
+  errC = getaddrinfo("senna.rhodes.edu", portStr, &hints, &res);
+  //socket
+  sfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+  if(sfd  == -1){
+   perror("socket failed");
+   exit(1);
+  }
+  //connect
+  if( connect(sfd, res->ai_addr, res->ai_addrlen) == -1 ){
+    perror("Not Connected");
+    exit(1);
+ }else{
+    printf("Connect succes");}
+
+ //reading writing
+ while(1){
+  readSize = read(STDIN_FILENO, buf, sizeof(buf));
+  if(readSize == -1){
+    perror("Client Read Error");
+    exit(1);
+  }
+  writeSize = write(sfd, buf, readSize);
+  if(writeSize == -1){
+    perror("Client Write Error");
+    exit(1);
+  }
+  if((readSize = read(sfd, buf, sizeof(buf))) == -1){
+    perror("Socket Read Error");
+    exit(1);
+  }
+  write(STDOUT_FILENO, buf, readSize);
+
+
+ }
+
+
+  close(sfd);
+
+}
